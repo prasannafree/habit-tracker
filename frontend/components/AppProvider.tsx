@@ -15,7 +15,7 @@ import React, { createContext, useContext, useMemo } from 'react';
 import { useHabits } from '@/hooks/useHabits';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useTheme } from '@/hooks/useTheme';
-import type { Habit, DailyHabitRecord, SortOption } from '@/types/habit';
+import type { Habit, DailyHabitRecord } from '@/types/habit';
 import type { UserSettings } from '@/types/settings';
 import { DEFAULT_SETTINGS } from '@/types/settings';
 import type { TimerData } from '@/hooks/useHabitTimer';

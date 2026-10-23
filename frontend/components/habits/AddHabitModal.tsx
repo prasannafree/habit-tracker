@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppContext } from '@/components/AppProvider';
 import { validateHabitName, validateTargetMinutes } from '@/lib/validation';
 
@@ -37,6 +37,15 @@ export default function AddHabitModal({ isOpen, onClose }: AddHabitModalProps) {
     }
   }, [isOpen]);
 
+  const handleClose = useCallback(() => {
+    setName('');
+    setTargetMinutes('');
+    setDescription('');
+    setErrors({});
+    setIsSaving(false);
+    onClose();
+  }, [onClose]);
+
   // Handle backdrop click to close
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -50,17 +59,7 @@ export default function AddHabitModal({ isOpen, onClose }: AddHabitModalProps) {
 
     dialog.addEventListener('click', handleClick);
     return () => dialog.removeEventListener('click', handleClick);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleClose = () => {
-    setName('');
-    setTargetMinutes('');
-    setDescription('');
-    setErrors({});
-    setIsSaving(false);
-    onClose();
-  };
+  }, [handleClose]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

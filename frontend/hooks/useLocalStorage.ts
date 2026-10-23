@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 
 const STORAGE_VERSION = 1;
 
@@ -40,13 +40,12 @@ export function useLocalStorage<T>(
     }
   });
 
-  // Track whether we've mounted (client-side).
-  // On the server, we always return defaultValue.
-  const [hasMounted, setHasMounted] = useState(false);
-
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
+  // Track whether we've mounted (client-side) using useSyncExternalStore to avoid setState in effect
+  const hasMounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
 
   // Persist to localStorage whenever the value changes
   useEffect(() => {

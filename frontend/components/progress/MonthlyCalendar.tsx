@@ -28,40 +28,58 @@ const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 interface MonthlyCalendarProps {
   selectedDate: string | null;
   onSelectDate: (dateKey: string) => void;
+  year?: number;
+  month?: number;
+  onMonthChange?: (year: number, month: number) => void;
 }
 
-export default function MonthlyCalendar({ selectedDate, onSelectDate }: MonthlyCalendarProps) {
+export default function MonthlyCalendar({
+  selectedDate,
+  onSelectDate,
+  year,
+  month,
+  onMonthChange,
+}: MonthlyCalendarProps) {
   const { allRecords } = useAppContext();
   const today = getLocalDateKey();
 
-  const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
-  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth() + 1);
+  const [internalYear, setInternalYear] = useState(() => new Date().getFullYear());
+  const [internalMonth, setInternalMonth] = useState(() => new Date().getMonth() + 1);
+
+  const viewYear = year ?? internalYear;
+  const viewMonth = month ?? internalMonth;
+
+  const updateYearMonth = (y: number, m: number) => {
+    if (onMonthChange) {
+      onMonthChange(y, m);
+    } else {
+      setInternalYear(y);
+      setInternalMonth(m);
+    }
+  };
 
   const daysInMonth = getDaysInMonth(viewYear, viewMonth);
   const firstDayOffset = getFirstDayOfMonth(viewYear, viewMonth);
 
   const goToPreviousMonth = () => {
     if (viewMonth === 1) {
-      setViewYear((y) => y - 1);
-      setViewMonth(12);
+      updateYearMonth(viewYear - 1, 12);
     } else {
-      setViewMonth((m) => m - 1);
+      updateYearMonth(viewYear, viewMonth - 1);
     }
   };
 
   const goToNextMonth = () => {
     if (viewMonth === 12) {
-      setViewYear((y) => y + 1);
-      setViewMonth(1);
+      updateYearMonth(viewYear + 1, 1);
     } else {
-      setViewMonth((m) => m + 1);
+      updateYearMonth(viewYear, viewMonth + 1);
     }
   };
 
   const goToToday = () => {
     const now = new Date();
-    setViewYear(now.getFullYear());
-    setViewMonth(now.getMonth() + 1);
+    updateYearMonth(now.getFullYear(), now.getMonth() + 1);
     onSelectDate(getLocalDateKey(now));
   };
 

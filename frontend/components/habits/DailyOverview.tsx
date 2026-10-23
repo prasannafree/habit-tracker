@@ -7,19 +7,22 @@
 'use client';
 
 import { useAppContext } from '@/components/AppProvider';
+import { useIsMounted } from '@/hooks/useIsMounted';
 import { computeDailyProgress, countCompletedHabits, totalTrackedMinutes, totalTargetMinutesFromRecords } from '@/lib/habit-utils';
-import { formatMinutes, getLocalDateKey } from '@/lib/date-utils';
+import { formatMinutes } from '@/lib/date-utils';
 
 export default function DailyOverview() {
-  const { habits, todayRecords, settings, currentDateKey } = useAppContext();
+  const { habits, todayRecords, settings } = useAppContext();
+  const isMounted = useIsMounted();
 
-  const today = new Date();
-  const dateStr = today.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  const dateStr = isMounted
+    ? new Date().toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      })
+    : '';
 
   const greeting = settings.greetingName
     ? `Hello, ${settings.greetingName}!`

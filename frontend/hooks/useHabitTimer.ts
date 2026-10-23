@@ -62,7 +62,9 @@ export function useHabitTimer({
   const dateKeyRef = useRef(currentDateKey);
 
   // Keep dateKeyRef in sync
-  dateKeyRef.current = currentDateKey;
+  useEffect(() => {
+    dateKeyRef.current = currentDateKey;
+  }, [currentDateKey]);
 
   // Clear interval helper
   const clearTickInterval = useCallback(() => {

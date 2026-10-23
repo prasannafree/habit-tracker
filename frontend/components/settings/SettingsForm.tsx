@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAppContext } from '@/components/AppProvider';
 import { validateDailyGoal } from '@/lib/validation';
 import type { ThemePreference, UserSettings } from '@/types/settings';
@@ -27,13 +27,15 @@ export default function SettingsForm() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  // Sync form when settings change externally
-  useEffect(() => {
+  // Sync form when settings change externally (e.g. loaded from storage or reset)
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings !== prevSettings) {
+    setPrevSettings(settings);
     setDisplayName(settings.displayName);
     setGreetingName(settings.greetingName ?? '');
     setDailyGoal(settings.dailyGoalMinutes?.toString() ?? '');
     setTheme(settings.theme);
-  }, [settings]);
+  }
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
