@@ -1,15 +1,12 @@
 /**
- * useHabits — central state management for habits and daily records.
+ * useHabits — central state management for habits, records, and backend sync.
  *
  * Responsibilities:
- * - CRUD operations on the habits array
- * - Managing daily habit records (historical tracking data)
- * - Timer integration (delegates to useHabitTimer)
- * - Persistence via useLocalStorage
- * - Day boundary detection via useSyncExternalStore
- *
- * Historical records snapshot the habit's name and target at tracking time,
- * so deleting or modifying a habit doesn't corrupt past analytics.
+ * - CRUD operations on habits with backend SQLite persistence
+ * - Real-time cross-device synchronization (polling & visibility change sync)
+ * - Automatic migration from client localStorage on first run
+ * - Day boundary detection
+ * - Single-timer state sync across devices
  */
 
 'use client';
@@ -21,6 +18,14 @@ import { useHabitTimer, INITIAL_TIMER_DATA } from './useHabitTimer';
 import type { TimerData } from './useHabitTimer';
 import { getLocalDateKey } from '@/lib/date-utils';
 import { generateId } from '@/lib/habit-utils';
+import {
+  fetchSyncState,
+  migrateLocalStorage,
+  apiAddHabit,
+  apiDeleteHabit,
+  apiUpsertRecord,
+  apiUpdateTimer,
+} from '@/lib/api';
 
 function subscribeToDateKey(callback: () => void) {
   // Check every 10 seconds for date change
@@ -42,7 +47,7 @@ export function useHabits() {
     'habit-tracker-records',
     []
   );
-  const [timerData, setTimerData] = useState<TimerData>(INITIAL_TIMER_DATA);
+  const [timerData, setTimerDataState] = useState<TimerData>(INITIAL_TIMER_DATA);
 
   // Sync date key safely across SSR/prerender and client without setState in effect
   const currentDateKey = useSyncExternalStore(
@@ -50,6 +55,18 @@ export function useHabits() {
     getLocalDateSnapshot,
     getLocalDateServerSnapshot
   );
+
+  // Wrapped timerData setter that also syncs state to backend
+  const setTimerData = useCallback((value: TimerData | ((prev: TimerData) => TimerData)) => {
+    setTimerDataState((prev) => {
+      const next = typeof value === 'function' ? value(prev) : value;
+      // Persist timer state to server asynchronously
+      apiUpdateTimer(next).catch((err) => {
+        console.error('Failed to sync timer state to server:', err);
+      });
+      return next;
+    });
+  }, []);
 
   // ── Today's records ──
   const todayRecords = useMemo(
@@ -68,36 +85,36 @@ export function useHabits() {
     (habitId: string, elapsedMs: number, completed: boolean) => {
       if (!currentDateKey) return;
 
+      const habit = habits.find((h) => h.id === habitId);
+      const habitName = habit?.name ?? 'Unknown';
+      const targetMin = habit?.targetMinutes ?? 0;
+
+      const cappedMs = Math.min(elapsedMs, targetMin * 60000);
+
+      let status: CompletionStatus;
+      if (completed || cappedMs >= targetMin * 60000) {
+        status = 'completed';
+      } else if (cappedMs > 0) {
+        status = 'in_progress';
+      } else {
+        status = 'not_started';
+      }
+
+      const record: DailyHabitRecord = {
+        dateKey: currentDateKey,
+        habitId,
+        habitNameSnapshot: habitName,
+        targetMinutesSnapshot: targetMin,
+        elapsedMs: cappedMs,
+        completionStatus: status,
+        lastUpdatedAt: new Date().toISOString(),
+      };
+
+      // Optimistic local update
       setDailyRecords((prev) => {
         const existingIdx = prev.findIndex(
           (r) => r.dateKey === currentDateKey && r.habitId === habitId
         );
-
-        const habit = habits.find((h) => h.id === habitId);
-        const habitName = habit?.name ?? 'Unknown';
-        const targetMin = habit?.targetMinutes ?? 0;
-
-        const cappedMs = Math.min(elapsedMs, targetMin * 60000);
-
-        let status: CompletionStatus;
-        if (completed || cappedMs >= targetMin * 60000) {
-          status = 'completed';
-        } else if (cappedMs > 0) {
-          status = 'in_progress';
-        } else {
-          status = 'not_started';
-        }
-
-        const record: DailyHabitRecord = {
-          dateKey: currentDateKey,
-          habitId,
-          habitNameSnapshot: habitName,
-          targetMinutesSnapshot: targetMin,
-          elapsedMs: cappedMs,
-          completionStatus: status,
-          lastUpdatedAt: new Date().toISOString(),
-        };
-
         if (existingIdx >= 0) {
           const updated = [...prev];
           updated[existingIdx] = record;
@@ -105,6 +122,11 @@ export function useHabits() {
         } else {
           return [...prev, record];
         }
+      });
+
+      // Backend sync
+      apiUpsertRecord(record).catch((err) => {
+        console.error('Failed to sync record to backend:', err);
       });
     },
     [currentDateKey, habits, setDailyRecords]
@@ -115,13 +137,13 @@ export function useHabits() {
 
   useEffect(() => {
     if (prevDateKeyRef.current && prevDateKeyRef.current !== currentDateKey) {
-      // Day changed! Stop timer for the previous day
+      // Day changed! Stop timer for previous day
       setTimerData(INITIAL_TIMER_DATA);
     }
     if (currentDateKey) {
       prevDateKeyRef.current = currentDateKey;
     }
-  }, [currentDateKey]);
+  }, [currentDateKey, setTimerData]);
 
   // ── Tick counter to force re-renders when timer is running ──
   const [, setTick] = useState(0);
@@ -169,9 +191,10 @@ export function useHabits() {
         createdAt: new Date().toISOString(),
         isArchived: false,
       };
+
+      // Optimistic update
       setHabits((prev) => [...prev, newHabit]);
 
-      // Create an initial "not_started" record for today
       if (currentDateKey) {
         const record: DailyHabitRecord = {
           dateKey: currentDateKey,
@@ -184,6 +207,13 @@ export function useHabits() {
         };
         setDailyRecords((prev) => [...prev, record]);
       }
+
+      // Backend sync
+      apiAddHabit(newHabit.name, newHabit.targetMinutes, newHabit.description, currentDateKey).catch(
+        (err) => {
+          console.error('Failed to create habit on server:', err);
+        }
+      );
     },
     [setHabits, setDailyRecords, currentDateKey]
   );
@@ -199,18 +229,96 @@ export function useHabits() {
         }));
       }
 
-      // Remove from habits list
+      // Optimistic removal from habits list
       setHabits((prev) => prev.filter((h) => h.id !== habitId));
 
-      // Remove today's record for this habit (historical records are preserved)
+      // Remove today's record for this habit
       if (currentDateKey) {
         setDailyRecords((prev) =>
           prev.filter((r) => !(r.dateKey === currentDateKey && r.habitId === habitId))
         );
       }
+
+      // Backend sync
+      apiDeleteHabit(habitId, currentDateKey).catch((err) => {
+        console.error('Failed to delete habit on server:', err);
+      });
     },
     [timerData.runningHabitId, setTimerData, setHabits, setDailyRecords, currentDateKey]
   );
+
+  // ── Backend Cross-Device Synchronization Loop ──
+  const isMigratedRef = useRef(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function syncWithBackend() {
+      try {
+        const serverState = await fetchSyncState();
+        if (!isMounted) return;
+
+        // Auto-migration on first client load if DB is empty
+        if (!isMigratedRef.current && serverState.habits.length === 0 && habits.length > 0) {
+          isMigratedRef.current = true;
+          const migrated = await migrateLocalStorage({
+            habits,
+            allRecords: dailyRecords,
+          });
+          if (isMounted) {
+            setHabits(migrated.habits);
+            setDailyRecords(migrated.allRecords);
+          }
+          return;
+        }
+
+        isMigratedRef.current = true;
+
+        // Sync habits if server differs
+        if (JSON.stringify(serverState.habits) !== JSON.stringify(habits)) {
+          setHabits(serverState.habits);
+        }
+
+        // Sync records if server differs
+        if (JSON.stringify(serverState.allRecords) !== JSON.stringify(dailyRecords)) {
+          setDailyRecords(serverState.allRecords);
+        }
+
+        // Sync timer state if changed on another device
+        if (
+          serverState.timerData.runningHabitId !== timerData.runningHabitId ||
+          serverState.timerData.sessionStartedAt !== timerData.sessionStartedAt
+        ) {
+          setTimerDataState(serverState.timerData);
+        }
+      } catch (err) {
+        // Silent catch for intermittent network disconnects
+        console.warn('Backend sync poll failed, retrying in next cycle:', err);
+      }
+    }
+
+    // Initial sync
+    syncWithBackend();
+
+    // Poll every 2.5 seconds for cross-device updates
+    const pollInterval = setInterval(syncWithBackend, 2500);
+
+    // Sync on window focus / tab visibility
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncWithBackend();
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', syncWithBackend);
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', syncWithBackend);
+    };
+  }, [habits, dailyRecords, timerData.runningHabitId, timerData.sessionStartedAt, setHabits, setDailyRecords]);
 
   return {
     habits: activeHabits,

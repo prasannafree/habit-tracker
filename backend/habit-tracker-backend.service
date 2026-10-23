@@ -1,0 +1,16 @@
+[Unit]
+Description=Habit Tracker FastAPI Backend Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/prasanna/Documents/my_projects/habit tracker
+ExecStart=/home/prasanna/.local/bin/uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=3
+TimeoutStopSec=3s
+KillMode=control-group
+Environment=PATH=/home/prasanna/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=default.target
